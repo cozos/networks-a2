@@ -98,7 +98,6 @@ class PathVectorNode : public Application {
       uint32_t ptr = readInt(buffer, size, packetSize);
       ptr += readInt(buffer + ptr, size - ptr, neighbour);
 
-
       AdvertisementPathPacket *advertisedPath = new AdvertisementPathPacket();
       if (packetSize == 1) {
         advertisedPath->destination = neighbour;
@@ -116,7 +115,7 @@ class PathVectorNode : public Application {
         compareAndReplaceAdvertisement(neighbour, storedAdvertisement, advertisedPath);
       }
 
-      NS_ASSERT(ptr == size);
+      // NS_ASSERT(ptr == size);
     }
     checkAllTimeouts();
   }
@@ -134,26 +133,18 @@ class PathVectorNode : public Application {
       uint32_t neighbour = itMap->first;
       Advertisement *adv = itMap->second;
 
+      (*shortestPathsMap)[neighbour] = new vector<uint32_t>();
+
       for (map<uint32_t, vector<uint32_t>* >::iterator itDV = adv->paths->begin(); itDV != adv->paths->end(); ++itDV) {
         // Create complete path.
         uint32_t destination = itDV->first;
         vector<uint32_t> *path = new vector<uint32_t>(*itDV->second);
         path->insert(path->begin(), neighbour);
-        path->push_back(destination);
 
-        vector<uint32_t> *pathSoFar = new vector<uint32_t>();
-        uint32_t lengthSoFar = 0;
-        for (vector<uint32_t>::iterator itPath = path->begin(); itPath != path->end(); ++itPath) {
-          uint32_t node = *itPath;
-
-          pathSoFar->push_back(node);
-          lengthSoFar++;
-
-          uint32_t existingLength = getLength(node, shortestPathsMap);
-
-          if (lengthSoFar < existingLength) {
-            (*shortestPathsMap)[node] = pathSoFar;
-          }
+        int pathSize = path->size() + 1;
+        int existingLength = getLength(destination, shortestPathsMap);
+        if (existingLength == -1 || pathSize < existingLength) {
+          (*shortestPathsMap)[destination] = path;
         }
       }
     }
@@ -171,12 +162,12 @@ class PathVectorNode : public Application {
   /*
    * Helper function for calculateShortestPath
    */
-  uint32_t getLength(uint32_t node, map<uint32_t, vector<uint32_t>* > *shortestPathsMap) {
+  int getLength(uint32_t node, map<uint32_t, vector<uint32_t>* > *shortestPathsMap) {
     map<uint32_t, vector<uint32_t>* >::iterator it = shortestPathsMap->find(node);
     if (it != shortestPathsMap->end()) {
       return it->second->size();
     } else {
-      return 0;
+      return -1;
     }
   }
 
@@ -207,11 +198,9 @@ class PathVectorNode : public Application {
     ptr += readInt(buf + ptr, size - ptr, destination);
     advertisedPath->destination = destination;
 
-
     uint32_t hopSize;
     ptr += readInt(buf + ptr, size - ptr, hopSize);
     advertisedPath->hops = new vector<uint32_t>(hopSize);
-
 
     for(unsigned int j = 0; j < hopSize; j++) {
       uint32_t hop;
@@ -303,7 +292,7 @@ class PathVectorNode : public Application {
   // Calculate the TTL of a PathVector being created.
   Time calculateExpirationDate() {
     Time expirationTime = Simulator::Now();
-    expirationTime += NanoSeconds(timeout);
+    expirationTime += Seconds(timeout);
     return expirationTime;
   }
 
