@@ -147,12 +147,13 @@ class PathVectorNode : public Application {
    */
   void storeAdvertisement(uint32_t neighbour, AdvertisementPathPacket *advertisedPath) {
     map<uint32_t, vector<uint32_t>* > *shortestPaths =  new map<uint32_t, vector<uint32_t>* >();
-    (*shortestPaths)[advertisedPath.destination] = advertisedPath.hops;
+    (*shortestPaths)[advertisedPath->destination] = advertisedPath->hops;
     Advertisement *newAdvertisement = new Advertisement();
     newAdvertisement->paths = shortestPaths;
     newAdvertisement->expiryDate = calculateExpirationDate();
     (*advertisementMap)[neighbour] = newAdvertisement;
     this->dirty = true;
+    cout << "SEGV DERP 1" << endl;
   }
 
   /*
@@ -162,14 +163,18 @@ class PathVectorNode : public Application {
    * If the stored advertisement's paths are mismatched with the advertised paths,
    * then we replace it.
    */
-  bool compareAndReplaceAdvertisement(Advertisement *storedAdvertisement, AdvertisementPathPacket *advertisedPathPacket) {
-    vector<uint32_t> *advertisedPath = advertisedPathPacket.hops;
-    map<uint32_t, vector<uint32_t>* >::iterator it = storedAdvertisement->paths->find(advertisedPathPacket.destination);
+  void compareAndReplaceAdvertisement(Advertisement *storedAdvertisement, AdvertisementPathPacket *advertisedPathPacket) {
+    cout << "SEGV DERP 2" << endl;
+
+    vector<uint32_t> *advertisedPath = advertisedPathPacket->hops;
+    map<uint32_t, vector<uint32_t>* >::iterator it = storedAdvertisement->paths->find(advertisedPathPacket->destination);
     if (it == storedAdvertisement->paths->end() || !comparePaths(it->second, advertisedPath)) {
-      (*storedAdvertisement->paths)[advertisedPathPacket.destination] = advertisedPath;
+      (*storedAdvertisement->paths)[advertisedPathPacket->destination] = advertisedPath;
       storedAdvertisement->expiryDate = calculateExpirationDate();
       this->dirty = true;
     }
+    cout << "SEGV DERP 3" << endl;
+
   }
 
   /*
@@ -213,7 +218,6 @@ class PathVectorNode : public Application {
     for (it = advertisementMap->begin(); it != advertisementMap->end();/*No Increment*/) {
       if (Simulator::Now().GetNanoSeconds() > it->second->expiryDate.GetNanoSeconds()) /* Check if path expired*/ {
         cout << "[" << ID << "]" << " Deleted " << it->second->expiryDate.GetNanoSeconds() << " | Current Time " << Simulator::Now().GetNanoSeconds() << " | Timeout " << timeout << endl;
-        freeAdvertisement(*(it->second));
         advertisementMap->erase(it++);
         this->dirty = true;
       } else {
@@ -228,9 +232,11 @@ class PathVectorNode : public Application {
    */
   void freeAdvertisement(Advertisement &advertisement) {
     map<uint32_t, vector<uint32_t>* >::iterator it;
+
     for (it = advertisement.paths->begin(); it != advertisement.paths->end(); ++it) {
-      delete it->second;
+      delete (it->second);
     }
+
     delete advertisement.paths;
   }
 
