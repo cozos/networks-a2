@@ -14,10 +14,8 @@ class PathVectorNode : public Application {
   /*************************** Data Members *****************************/
   /**********************************************************************/
 
-  struct AdvertisementPathPacket {
-    vector<uint32_t> *hops;
-    uint32_t destination;
-  };
+  // <Neighbour, Advertisement>
+  map<uint32_t, *Advertisement> *advertisementMap;
 
   struct Advertisement {
     // <Destination, Hops>
@@ -25,8 +23,17 @@ class PathVectorNode : public Application {
     time_t expiryDate;
   };
 
-  // <Neighbour, Advertisement>
-  map<uint32_t, Advertisement> *advertisementMap;
+  // Structure of packets sent and received.
+  struct AdvertisementPathPacket {
+    vector<uint32_t> *hops;
+    uint32_t destination;
+  };
+
+  // To check if we need to recompute the shortestPaths.
+  bool dirty;
+
+  // The shortestPaths that the node would advertise.
+  vector<AdvertisementPathPacket> shortestPaths;
 
   /**********************************************************************/
   /**********************************************************************/
@@ -80,18 +87,13 @@ class PathVectorNode : public Application {
 
       vector<AdvertisementPathPacket> *advertisedPathVector; // TODO: Deserialize.
 
-      // Update our PathVector
-      for (vector<AdvertisementPathPacket>::iterator itAdvertised = advertisedPathVector->begin(); itAdvertised != advertisedPathVector->end;/*No Increment*/){
-        AdvertisementPathPacket advertisedPathPacket = *itAdvertised;
+      Advertisement *storedAdvertisement = getAdvertisement(neighbour);
 
-        if (advertisedPathPacket.destination == this.ID ||
-            advertisedPathPacket.hops->contains(this.ID)) {
-          removePathVector(neighbour, advertisedPathPacket.destination);
-        } else {
-          insertPathVector(neighbour, advertisedPathPacket);
-        }
-
-        deleteAdvertisementPathPacket(advertisedPathPacket);
+      // If we couldn't find a stored advertisement, then store it.
+      if (storedAdvertisement == NULL ||
+          compareAdvertisement(storedAdvertisement, advertisedPathVector)) {
+        storeAdvertisement(neighbour, advertisedPathVector);
+        this.dirty = true;
       }
 
       NS_ASSERT(ptr == size);
@@ -103,47 +105,69 @@ class PathVectorNode : public Application {
   /************************* Private Routines ***************************/
   /**********************************************************************/
 
-  void insertPathVector(uint32_t neighbour, AdvertisementPathPacket &advertisedShortestPath) {
-    bool foundExistingPathFlag = false;
 
-    for (vector<ShortestPath>::iterator it_current = pathVector->begin(); it_current != pathVector->end();/*No Increment*/) {
-      ShortestPath currentShortestPath = *it_current;
-
-      if (currentShortestPath.destination == advertisedShortestPath.destination) {
-        foundExistingPathFlag = true;
-        if (currentShortestPath.hops->size() <= advertisedShortestPath.hops->size()) { // During ties the new path wins because reasons.
-          currentShortestPath.neighbour = neighbour;
-          delete *currentShortestPath.hops;
-          currentShortestPath.hops = new vector<uint32_t>(advertisedShortestPath.hops);
-          currentShortestPath.expiryDate = calculateExpirationDate();
-        }
-      }
-
-      ++it_current;
+  void storeAdvertisement(uint32_t neighbour, vector<AdvertisementPathPacket> *advertisedPathVector) {
+    map<uint32_t, vector<uint32_t>* > *shortestPaths;
+    vector<AdvertisementPathPacket>::iterator it;
+    for (it = advertisedPathVector->begin(); it != advertisedPathVector->end; ++it) {
+      AdvertisementPathPacket path = *it;
+      *(shortestPaths)[path.destination] = path.hops;
     }
 
-    // If we didn't find any existing paths in the pathVector, create a new one and add it.
-    if (!foundExistingPathFlag) {
-      AdvertisementPath newPath;
-      newPath.neighbour = neighbour;
-      newPath.hops = new vector<uint32_t>(advertisedShortestPath.hops);
-      newPath.destination = advertisedShortestPath.destination;
-      newPath.expiryDate = calculateExpirationDate();
-      pathVector->insert(newPath);
-    }
+    Advertisement *newAdvertisement;
+    newAdvertisement->paths = shortestPaths;
+    newAdvertisement->expiryDate = calculateExpirationDate();
+    *(advertisementMap)[neighbour] = newAdvertisement;
   }
 
-  void removePathVector(neighbour, destination) {
-    map<uint32_t, Advertisement>::iterator it = advertisementMap->find(neighbour);
-    if (it != advertisementMap->end()) {
-      Advertisement advertisement = it->second;
+  bool compareAdvertisement(Advertisement *storedAdvertisement, vector<AdvertisementPathPacket> *advertisedPathVector) {
+    bool changed = false;
 
-      map<uint32_t, AdvertisementPath>::iterator it2 = advertisement.paths->find(destination);
-      if (it2 != advertisement.paths->end()) {
-        delete it2->second; // Free the Path Vector first.
-        advertisement.paths.erase(it2);
+    // First, do the comparison to check if they are the same.
+    vector<AdvertisementPathPacket>::iterator it;
+    for (it = advertisedPathVector->begin(); it != advertisedPathVector->end; ++it) {
+      AdvertisementPathPacket advertisedPathPacket = *it;
+      vector<uint32_t> *advertisedPath = advertisedPathPacket.hops;
+
+      map<uint32_t, vector<uint32_t>* >::iterator it2 = storedAdvertisement->paths->find(advertisedPathPacket.destination);
+      if (it2 != storedAdvertisement->end() ||
+          !comparePaths(it2->second, advertisedPath)) {
+        changed = true;
       }
     }
+
+    // If the advertisement isn't the same, then we delete it.
+    if (changed) {
+      deleteAdvertisement(*storeAdvertisement)
+    }
+
+    storedAdvertisement.expiryDate = calculateExpirationDate();
+    return changed;
+  }
+
+  /*
+   * Returns true if equal, false if not.
+   */
+  bool comparePaths(vector<uint32_t> *path1, vector<uint32_t> *path2) {
+    vector<uint32_t>::iterator it1;
+    vector<uint32_t>::iterator it2 = path2->begin();
+    for (it1 = path1->begin(); it1 != path1->end(); ++it1) {
+      if (it2 != path2->end() && *it1 == *it2) {
+        ++it2;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Advertisement& getAdvertisement(uint32_t neighbour) {
+    map<uint32_t, *Advertisement>::iterator it = advertisementMap->find(neighbour);
+    Advertisement *advertisement = NULL;
+    if (it != advertisementMap->end()) {
+      advertisement = it->second;
+    }
+    return advertisement;
   }
 
   // Calculate the TTL of a PathVector being created.
@@ -158,6 +182,7 @@ class PathVectorNode : public Application {
       if (time(0) > *it.expiryDate) /* Check if path expired*/ {
         deleteAdvertisement(it->second);
         it = v.erase(it);
+        this.dirty = true;
       } else {
         ++it;
       }
@@ -166,11 +191,11 @@ class PathVectorNode : public Application {
 
   void deleteAdvertisement(Advertisement &advertisement) {
     map<uint32_t, vector<uint32_t>* >::iterator it;
-    for (it = advertisement.paths.begin(); it != advertisement.paths.end();/*No Increment*/) {
+    for (it = advertisement.paths.begin(); it != advertisement.paths.end(); ++it) {
       delete it.second;
     }
     delete advertisement.paths;
-    delete advertisement;
+    delete *advertisement;
   }
 
   void deleteAdvertisementPathPacket(AdvertisementPathPacket &advertisementPathPacket) {
@@ -184,7 +209,7 @@ class PathVectorNode : public Application {
 public:
   PathVectorNode(uint32_t id, uint32_t nc, double i, double t)
     : ID(id), nodeCount(nc), interval(i), timeout(t) {
-    // students might need to add code here
+    this.dirty = false;
   }
 
   void AddSocket(Ptr<Socket> socket) {
