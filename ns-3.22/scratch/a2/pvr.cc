@@ -21,15 +21,15 @@ class PathVectorNode : public Application {
 
   // Structure of packets sent and received.
   struct AdvertisementPathPacket {
-    vector<uint32_t> *hops;
     uint32_t destination;
+    vector<uint32_t> *hops;
   };
 
   // The shortestPaths that the node would advertise.
-  vector<AdvertisementPathPacket> shortestPaths;
+  vector<AdvertisementPathPacket> *shortestPaths;
 
   // <Neighbour, Advertisement>
-  map<uint32_t, *Advertisement> *advertisementMap;
+  map<uint32_t, Advertisement*> *advertisementMap;
 
   // To check if we need to recompute the shortestPaths.
   bool dirty;
@@ -67,10 +67,11 @@ class PathVectorNode : public Application {
     // create message buffer
     uint8_t buffer[maxMsgSize];
     uint32_t ptr = writeInt(buffer, maxMsgSize, ID);
+    serializePathVector(this->shortestPaths, buffer, ptr);
 
     // send via all sockets
     list< Ptr<Socket> >::iterator iter;
-    for (iter = socketList.begin(); iter != socketList->end(); ++iter) {
+    for (iter = socketList.begin(); iter != socketList.end(); ++iter) {
       Ptr<Packet> packet = Create<Packet>( buffer, ptr );
       (*iter)->Send(packet);
     }
@@ -84,7 +85,7 @@ class PathVectorNode : public Application {
       uint32_t neighbour;
       uint32_t ptr = readInt(buffer, size, neighbour);
 
-      vector<AdvertisementPathPacket> *advertisedPathVector =  new Vector<AdvertisementPathPacket>(); // TODO: Deserialize.
+      vector<AdvertisementPathPacket> *advertisedPathVector =  deserializePathVector(buffer, size, ptr); // TODO: Deserialize.
 
       Advertisement *storedAdvertisement = getAdvertisement(neighbour);
 
@@ -92,33 +93,80 @@ class PathVectorNode : public Application {
       if (storedAdvertisement == NULL ||
           compareAdvertisement(storedAdvertisement, advertisedPathVector)) {
         storeAdvertisement(neighbour, advertisedPathVector);
-        this.dirty = true;
+        this->dirty = true;
       }
+
+      vector<AdvertisementPathPacket>::iterator it;
+      for (it = advertisedPathVector->begin(); it != advertisedPathVector->end(); ++it) {
+        freeAdvertisementPathPacket(*it);
+      }
+      delete advertisedPathVector;
 
       NS_ASSERT(ptr == size);
     }
     checkAllTimeouts();
   }
 
-
   /************************* Private Routines ***************************/
   /**********************************************************************/
+
+  // Serializes the shortest PathVector into a buffer
+  void serializePathVector(vector<AdvertisementPathPacket> *pathVector, uint8_t &buffer, uint32_t &ptr) {
+    ptr += writeInt(buffer, maxMsgSize - ptr, pathVector->size());
+
+    for (int i = 0; i < pathVector->size(); i++) {
+      vector<uint32_t> *hops = pathVector->at(i).hops;
+
+      ptr += writeInt(buffer, maxMsgSize - ptr, pathVector->at(i)->destination);
+      ptr += writeInt(buffer, maxMsgSize - ptr, hops->size());
+
+      for (int j = 0; j < hops->size(); j++) {
+        ptr += writeInt(buffer, maxMsgSize - ptr, hops[j]);
+      }
+    }
+  }
+
+  // Serializes the Packet into a vector.
+  vector<AdvertisementPathPacket>* deserializePathVector(uint8_t* buf, uint8_t size, uint32_t &ptr) {
+    uint32_t vectorSize;
+    ptr += readInt(buffer, size - ptr, vectorSize);
+    vector<AdvertisementPathPacket> *advertisedPathVector =  new vector<AdvertisementPathPacket>(vectorSize);
+    for(int i = 0; i < vectorSize; i++) {
+      AdvertisementPathPacket advertisedPath;
+
+      uint32_t destination;
+      ptr += readInt(buffer, size - ptr, destination);
+      advertisedPath.destination = destination;
+
+      uint32_t hopSize;
+      ptr += readInt(buffer, size - ptr, hopSize);
+      advertisedPath.hops = new vector<AdvertisementPathPacket>(hopSize);
+
+      for(int j = 0; j < hopSize; j++) {
+        uint32_t hop;
+        ptr += readInt(buffer, size - ptr, hop);
+        advertisedPath.hops[j] = hop;
+      }
+    }
+
+    return advertisedPathVector;
+  }
 
   /*
    * Stores the advertised path vector in advertisementMap corresponding to the neighbour.
    */
   void storeAdvertisement(uint32_t neighbour, vector<AdvertisementPathPacket> *advertisedPathVector) {
-    map<uint32_t, vector<uint32_t>* > *shortestPaths;
+    map<uint32_t, vector<uint32_t>* > *shortestPaths =  new map<uint32_t, vector<uint32_t>* >();
     vector<AdvertisementPathPacket>::iterator it;
-    for (it = advertisedPathVector->begin(); it != advertisedPathVector->end; ++it) {
+    for (it = advertisedPathVector->begin(); it != advertisedPathVector->end(); ++it) {
       AdvertisementPathPacket path = *it;
-      *(shortestPaths)[path.destination] = path.hops;
+      (*shortestPaths)[path.destination] = path.hops;
     }
 
-    Advertisement *newAdvertisement;
+    Advertisement *newAdvertisement = new Advertisement();
     newAdvertisement->paths = shortestPaths;
     newAdvertisement->expiryDate = calculateExpirationDate();
-    *(advertisementMap)[neighbour] = newAdvertisement;
+    (*advertisementMap)[neighbour] = newAdvertisement;
   }
 
   /*
@@ -131,12 +179,12 @@ class PathVectorNode : public Application {
 
     // First, do the comparison to check if they are the same.
     vector<AdvertisementPathPacket>::iterator it;
-    for (it = advertisedPathVector->begin(); it != advertisedPathVector->end; ++it) {
+    for (it = advertisedPathVector->begin(); it != advertisedPathVector->end(); ++it) {
       AdvertisementPathPacket advertisedPathPacket = *it;
       vector<uint32_t> *advertisedPath = advertisedPathPacket.hops;
 
       map<uint32_t, vector<uint32_t>* >::iterator it2 = storedAdvertisement->paths->find(advertisedPathPacket.destination);
-      if (it2 != storedAdvertisement->end() ||
+      if (it2 != storedAdvertisement->paths->end() ||
           !comparePaths(it2->second, advertisedPath)) {
         changed = true;
       }
@@ -144,10 +192,11 @@ class PathVectorNode : public Application {
 
     // If the advertisement isn't the same, then we delete it.
     if (changed) {
-      deleteAdvertisement(*storeAdvertisement)
+      freeAdvertisement(*storedAdvertisement);
+      delete storedAdvertisement;
     }
 
-    storedAdvertisement.expiryDate = calculateExpirationDate();
+    storedAdvertisement->expiryDate = calculateExpirationDate();
     return changed;
   }
 
@@ -170,8 +219,8 @@ class PathVectorNode : public Application {
   /*
    * Finds an Advertisement from the advertisementMap
    */
-  Advertisement& getAdvertisement(uint32_t neighbour) {
-    map<uint32_t, *Advertisement>::iterator it = advertisementMap->find(neighbour);
+  Advertisement* getAdvertisement(uint32_t neighbour) {
+    map<uint32_t, Advertisement*>::iterator it = advertisementMap->find(neighbour);
     Advertisement *advertisement = NULL;
     if (it != advertisementMap->end()) {
       advertisement = it->second;
@@ -181,19 +230,19 @@ class PathVectorNode : public Application {
 
   // Calculate the TTL of a PathVector being created.
   Time calculateExpirationDate() {
-    Time expirationTime = Simulator::Now()
+    Time expirationTime = Simulator::Now();
     expirationTime += Seconds(timeout);
     return expirationTime;
   }
 
   // students need to implement a proper version of this routine
   void checkAllTimeouts() {
-    map<uint32_t, Advertisement>::iterator it;
+    map<uint32_t, Advertisement*>::iterator it;
     for (it = advertisementMap->begin(); it != advertisementMap->end();/*No Increment*/) {
-      if (Simulator::Now() > *it.expiryDate) /* Check if path expired*/ {
-        deleteAdvertisement(it->second);
-        it = v.erase(it);
-        this.dirty = true;
+      if (Simulator::Now() > it->second->expiryDate) /* Check if path expired*/ {
+        freeAdvertisement(*(it->second));
+        advertisementMap->erase(it++);
+        this->dirty = true;
       } else {
         ++it;
       }
@@ -203,21 +252,19 @@ class PathVectorNode : public Application {
   /*
    * Frees the Advertisement struct
    */
-  void deleteAdvertisement(Advertisement &advertisement) {
+  void freeAdvertisement(Advertisement &advertisement) {
     map<uint32_t, vector<uint32_t>* >::iterator it;
-    for (it = advertisement.paths.begin(); it != advertisement.paths.end(); ++it) {
-      delete it.second;
+    for (it = advertisement.paths->begin(); it != advertisement.paths->end(); ++it) {
+      delete it->second;
     }
     delete advertisement.paths;
-    delete *advertisement;
   }
 
   /*
    * Frees the AdvertisementPathPacket struct
    */
-  void deleteAdvertisementPathPacket(AdvertisementPathPacket &advertisementPathPacket) {
+  void freeAdvertisementPathPacket(AdvertisementPathPacket &advertisementPathPacket) {
     delete advertisementPathPacket.hops;
-    delete advertisementPathPacket;
   }
 
   /**********************************************************************/
@@ -226,7 +273,9 @@ class PathVectorNode : public Application {
 public:
   PathVectorNode(uint32_t id, uint32_t nc, double i, double t)
     : ID(id), nodeCount(nc), interval(i), timeout(t) {
-    this.dirty = false;
+    this->dirty = false;
+    this->advertisementMap = new map<uint32_t, Advertisement*>();
+    this->shortestPaths = new vector<AdvertisementPathPacket>();
   }
 
   void AddSocket(Ptr<Socket> socket) {
