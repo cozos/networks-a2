@@ -1,5 +1,4 @@
 #include "pvr-top.h"
-#include <time.h>
 #include <vector>
 #include <map>
 
@@ -20,7 +19,7 @@ class PathVectorNode : public Application {
   struct Advertisement {
     // <Destination, Hops>
     map<uint32_t, vector<uint32_t>* > *paths;
-    time_t expiryDate;
+    Time expiryDate;
   };
 
   // Structure of packets sent and received.
@@ -105,7 +104,9 @@ class PathVectorNode : public Application {
   /************************* Private Routines ***************************/
   /**********************************************************************/
 
-
+  /*
+   * Stores the advertised path vector in advertisementMap corresponding to the neighbour.
+   */
   void storeAdvertisement(uint32_t neighbour, vector<AdvertisementPathPacket> *advertisedPathVector) {
     map<uint32_t, vector<uint32_t>* > *shortestPaths;
     vector<AdvertisementPathPacket>::iterator it;
@@ -120,6 +121,11 @@ class PathVectorNode : public Application {
     *(advertisementMap)[neighbour] = newAdvertisement;
   }
 
+  /*
+   * Compares the stored advertisement to the advertised paths.
+   * If the stored advertisement's paths are mismatched with the addvertised paths,
+   * then we delete it.
+   */
   bool compareAdvertisement(Advertisement *storedAdvertisement, vector<AdvertisementPathPacket> *advertisedPathVector) {
     bool changed = false;
 
@@ -161,6 +167,9 @@ class PathVectorNode : public Application {
     return true;
   }
 
+  /*
+   * Finds an Advertisement from the advertisementMap
+   */
   Advertisement& getAdvertisement(uint32_t neighbour) {
     map<uint32_t, *Advertisement>::iterator it = advertisementMap->find(neighbour);
     Advertisement *advertisement = NULL;
@@ -171,15 +180,17 @@ class PathVectorNode : public Application {
   }
 
   // Calculate the TTL of a PathVector being created.
-  time_t calculateExpirationDate() {
-    return time(0) + this.timeout;
+  Time calculateExpirationDate() {
+    Time expirationTime = Simulator::Now()
+    expirationTime += Seconds(timeout);
+    return expirationTime;
   }
 
   // students need to implement a proper version of this routine
   void checkAllTimeouts() {
     map<uint32_t, Advertisement>::iterator it;
     for (it = advertisementMap->begin(); it != advertisementMap->end();/*No Increment*/) {
-      if (time(0) > *it.expiryDate) /* Check if path expired*/ {
+      if (Simulator::Now() > *it.expiryDate) /* Check if path expired*/ {
         deleteAdvertisement(it->second);
         it = v.erase(it);
         this.dirty = true;
@@ -189,6 +200,9 @@ class PathVectorNode : public Application {
     }
   }
 
+  /*
+   * Frees the Advertisement struct
+   */
   void deleteAdvertisement(Advertisement &advertisement) {
     map<uint32_t, vector<uint32_t>* >::iterator it;
     for (it = advertisement.paths.begin(); it != advertisement.paths.end(); ++it) {
@@ -198,6 +212,9 @@ class PathVectorNode : public Application {
     delete *advertisement;
   }
 
+  /*
+   * Frees the AdvertisementPathPacket struct
+   */
   void deleteAdvertisementPathPacket(AdvertisementPathPacket &advertisementPathPacket) {
     delete advertisementPathPacket.hops;
     delete advertisementPathPacket;
