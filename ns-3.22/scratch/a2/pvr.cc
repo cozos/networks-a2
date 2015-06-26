@@ -65,6 +65,11 @@ class PathVectorNode : public Application {
   // students need to implement a proper version of this routine
   void send() {
     // send via all sockets
+    if (dirty) {
+      calculateShortestPaths();
+      dirty = false;
+    }
+
     list< Ptr<Socket> >::iterator iter;
     for (iter = socketList.begin(); iter != socketList.end(); ++iter) {
       for(unsigned int i = 0; i < this->shortestPaths->size(); i++) {
@@ -95,8 +100,6 @@ class PathVectorNode : public Application {
         compareAndReplaceAdvertisement(storedAdvertisement, advertisedPath);
       }
 
-      freeAdvertisementPathPacket(*advertisedPath);
-
       NS_ASSERT(ptr == size);
     }
     checkAllTimeouts();
@@ -104,6 +107,13 @@ class PathVectorNode : public Application {
 
   /************************* Private Routines ***************************/
   /**********************************************************************/
+
+  /*
+   * Calculates the shortestPaths.
+   */
+  void calculateShortestPaths() {
+    // for ()
+  }
 
   /*
    * Serializes the shortest PathVector into a buffer
@@ -153,34 +163,44 @@ class PathVectorNode : public Application {
     newAdvertisement->expiryDate = calculateExpirationDate();
     (*advertisementMap)[neighbour] = newAdvertisement;
     this->dirty = true;
-    cout << "SEGV DERP 1" << endl;
   }
 
   /*
-   * RETURNS TRUE IF COMPARE EQUAL, FALSE OTHERWISE.
-   *
    * Compares the stored advertisement to the advertised paths.
    * If the stored advertisement's paths are mismatched with the advertised paths,
    * then we replace it.
    */
   void compareAndReplaceAdvertisement(Advertisement *storedAdvertisement, AdvertisementPathPacket *advertisedPathPacket) {
-    cout << "SEGV DERP 2" << endl;
-
     vector<uint32_t> *advertisedPath = advertisedPathPacket->hops;
     map<uint32_t, vector<uint32_t>* >::iterator it = storedAdvertisement->paths->find(advertisedPathPacket->destination);
-    if (it == storedAdvertisement->paths->end() || !comparePaths(it->second, advertisedPath)) {
-      (*storedAdvertisement->paths)[advertisedPathPacket->destination] = advertisedPath;
-      storedAdvertisement->expiryDate = calculateExpirationDate();
-      this->dirty = true;
+    if (it != storedAdvertisement->paths->end()) {
+      if (containsMyself(advertisedPath)) {
+        (*storedAdvertisement->paths)[advertisedPathPacket->destination] = new vector<uint32_t>();
+        this->dirty = true;
+      } else if (!equalPaths(it->second, advertisedPath)){
+        (*storedAdvertisement->paths)[advertisedPathPacket->destination] = advertisedPath;
+        storedAdvertisement->expiryDate = calculateExpirationDate();
+        this->dirty = true;
+      }
     }
-    cout << "SEGV DERP 3" << endl;
+  }
 
+  /*
+   * RETURNS TRUE IF FINDS OWN ID, FALSE OTHERWISE.
+   */
+  bool containsMyself(vector<uint32_t> *path) {
+    vector<uint32_t>::iterator it = find(path->begin(), path->end(), this->ID);
+    return it != path->end();
   }
 
   /*
    * Returns true if equal, false if not.
    */
-  bool comparePaths(vector<uint32_t> *path1, vector<uint32_t> *path2) {
+  bool equalPaths(vector<uint32_t> *path1, vector<uint32_t> *path2) {
+    if (path1->size() != path2->size()) {
+      return false;
+    }
+
     vector<uint32_t>::iterator it1;
     vector<uint32_t>::iterator it2 = path2->begin();
     for (it1 = path1->begin(); it1 != path1->end(); ++it1) {
@@ -217,34 +237,12 @@ class PathVectorNode : public Application {
     map<uint32_t, Advertisement*>::iterator it;
     for (it = advertisementMap->begin(); it != advertisementMap->end();/*No Increment*/) {
       if (Simulator::Now().GetNanoSeconds() > it->second->expiryDate.GetNanoSeconds()) /* Check if path expired*/ {
-        cout << "[" << ID << "]" << " Deleted " << it->second->expiryDate.GetNanoSeconds() << " | Current Time " << Simulator::Now().GetNanoSeconds() << " | Timeout " << timeout << endl;
         advertisementMap->erase(it++);
         this->dirty = true;
       } else {
-        cout << "[" << ID << "]" << " Didn't delete " << it->second->expiryDate.GetNanoSeconds() << " | Current Time " << Simulator::Now().GetNanoSeconds() << " | Timeout " << timeout << " | Difference " << Simulator::Now().GetNanoSeconds() - it->second->expiryDate.GetNanoSeconds()<<endl;
         ++it;
       }
     }
-  }
-
-  /*
-   * Frees the Advertisement struct
-   */
-  void freeAdvertisement(Advertisement &advertisement) {
-    map<uint32_t, vector<uint32_t>* >::iterator it;
-
-    for (it = advertisement.paths->begin(); it != advertisement.paths->end(); ++it) {
-      delete (it->second);
-    }
-
-    delete advertisement.paths;
-  }
-
-  /*
-   * Frees the AdvertisementPathPacket struct
-   */
-  void freeAdvertisementPathPacket(AdvertisementPathPacket &advertisementPathPacket) {
-    delete advertisementPathPacket.hops;
   }
 
   /**********************************************************************/
@@ -256,7 +254,6 @@ public:
     this->dirty = false;
     this->advertisementMap = new map<uint32_t, Advertisement*>();
     this->shortestPaths = new vector<AdvertisementPathPacket>();
-
     for(int i = 0; i < 1; i++) {
       AdvertisementPathPacket derp;
       derp.destination = i;
