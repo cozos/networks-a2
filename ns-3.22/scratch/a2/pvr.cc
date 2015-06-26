@@ -13,9 +13,6 @@ class PathVectorNode : public Application {
   /*************************** Data Members *****************************/
   /**********************************************************************/
 
-  // <Neighbour, Advertisement>
-  map<uint32_t, *Advertisement> *advertisementMap;
-
   struct Advertisement {
     // <Destination, Hops>
     map<uint32_t, vector<uint32_t>* > *paths;
@@ -28,11 +25,14 @@ class PathVectorNode : public Application {
     uint32_t destination;
   };
 
-  // To check if we need to recompute the shortestPaths.
-  bool dirty;
-
   // The shortestPaths that the node would advertise.
   vector<AdvertisementPathPacket> shortestPaths;
+
+  // <Neighbour, Advertisement>
+  map<uint32_t, *Advertisement> *advertisementMap;
+
+  // To check if we need to recompute the shortestPaths.
+  bool dirty;
 
   /**********************************************************************/
   /**********************************************************************/
@@ -84,7 +84,7 @@ class PathVectorNode : public Application {
       uint32_t neighbour;
       uint32_t ptr = readInt(buffer, size, neighbour);
 
-      vector<AdvertisementPathPacket> *advertisedPathVector; // TODO: Deserialize.
+      vector<AdvertisementPathPacket> *advertisedPathVector =  new Vector<AdvertisementPathPacket>(); // TODO: Deserialize.
 
       Advertisement *storedAdvertisement = getAdvertisement(neighbour);
 
